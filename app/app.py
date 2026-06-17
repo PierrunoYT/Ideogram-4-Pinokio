@@ -22,6 +22,8 @@ from huggingface_hub.utils import enable_progress_bars
 import diffusers
 from diffusers import Ideogram4Pipeline
 
+from studio_editor import StudioEditor
+
 # Surface download + component-loading progress in the terminal.
 enable_progress_bars()
 diffusers.utils.logging.set_verbosity_info()
@@ -64,11 +66,6 @@ MODES = {
 }
 
 DEFAULT_PROMPT = "a ginger cat wearing a tiny wizard hat reading a spellbook"
-DEFAULT_JSON = {
-    "high_level_description": "",
-    "style_description": {"aesthetics": "", "lighting": "", "medium": "", "art_style": "", "color_palette": []},
-    "compositional_deconstruction": {"background": "", "elements": []},
-}
 
 # --- Lazy model: nothing loads at startup. Sign in, then Download to load the nf4 pipeline (kept quantized
 # to save VRAM). The model runs eager — no ZeroGPU / AOTI fast-path locally. ---
@@ -181,7 +178,7 @@ def generate_prompt(prompt, upsampler, width, height, progress=gr.Progress(track
     else:
         progress(0.0, desc="✍️ Upsampling (local Qwen)…")
         jp = local_upsample(prompt, width, height)
-    return json.dumps(jp, ensure_ascii=False, indent=2)
+    return gr.update(value=jp)
 
 
 # --- Image generation ---------------------------------------------------------------------------------------
@@ -220,8 +217,9 @@ with gr.Blocks(title="Ideogram 4 Studio", css=CSS, theme=gr.themes.Citrus()) as 
     gr.Markdown(
         "# Ideogram 4 Studio\n"
         "Run Ideogram's open-weights model locally. Draft a structured JSON prompt from text "
-        "(**✨ Generate prompt**), edit it directly — including `compositional_deconstruction.elements` with "
-        "`bbox` layout boxes and `color_palette` hex lists — then render it (**🎨 Generate image**).\n\n"
+        "(**✨ Generate prompt**), refine it in the visual editor — drag boxes on the canvas to place "
+        "elements and text, set color palettes, or edit the JSON directly — then render it "
+        "(**🎨 Generate image**).\n\n"
         "[Model](https://huggingface.co/ideogram-ai/ideogram-4-nf4) · "
         "[Prompting guide](https://huggingface.co/ideogram-ai/ideogram-4-nf4#prompting-guide) · "
         "[Blog](https://ideogram.ai/blog/ideogram-4.0/)"
@@ -283,13 +281,7 @@ with gr.Blocks(title="Ideogram 4 Studio", css=CSS, theme=gr.themes.Citrus()) as 
                 randomize = gr.Checkbox(label="Randomize seed", value=True)
 
         with gr.Column(scale=2):
-            json_editor = gr.Code(
-                label="Structured JSON prompt (editable)",
-                language="json",
-                value=json.dumps(DEFAULT_JSON, indent=2),
-                lines=20,
-                interactive=True,
-            )
+            editor = StudioEditor()
             with gr.Row():
                 mode = gr.Radio(
                     choices=list(MODES.keys()), value="Default · 20 steps", label="Mode (speed ↔ quality)", scale=2
@@ -305,12 +297,14 @@ with gr.Blocks(title="Ideogram 4 Studio", css=CSS, theme=gr.themes.Citrus()) as 
     gen_prompt_btn.click(
         generate_prompt,
         inputs=[prompt, upsampler, width, height],
-        outputs=[json_editor],
+        outputs=[editor],
     )
     gen_image_btn.click(
         generate_image,
-        inputs=[json_editor, mode, width, height, seed, randomize],
+        inputs=[editor, mode, width, height, seed, randomize],
         outputs=[out_image, used_seed],
     )
+    width.change(lambda v: gr.update(img_width=int(v)), width, editor, show_progress="hidden")
+    height.change(lambda v: gr.update(img_height=int(v)), height, editor, show_progress="hidden")
 
 demo.launch()
