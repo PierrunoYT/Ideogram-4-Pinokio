@@ -15,7 +15,7 @@ import time
 import gradio as gr
 import requests
 import torch
-from huggingface_hub import get_token
+from huggingface_hub import get_token, login, whoami
 
 from diffusers import Ideogram4Pipeline
 
@@ -58,19 +58,50 @@ MODES = {
     "Quality · 48 steps": dict(num_inference_steps=48, guidance_schedule=(7.0,) * 45 + (3.0,) * 3, mu=0.0, std=1.5),
 }
 
-# --- Pipeline: load nf4-quantized straight onto the GPU. Locally we keep the weights quantized (no dequant
-# to bf16) so the model fits in far less VRAM; there's no AOTI fast-path here, the transformers run eager. ---
-if not HF_TOKEN:
-    raise SystemExit(
-        "No Hugging Face token found. ideogram-4-nf4 is gated.\n"
-        "Set HF_TOKEN (Pinokio writes it to the ENVIRONMENT file at install time) or run `hf auth login`,\n"
-        "and make sure you've accepted the gate at https://huggingface.co/ideogram-ai/ideogram-4-nf4"
-    )
-t = time.perf_counter()
-load_kwargs = {"torch_dtype": torch.bfloat16, "token": HF_TOKEN}
-pipe = Ideogram4Pipeline.from_pretrained(MODEL_ID, **load_kwargs)
-pipe.to(DEVICE)
-print(f"[timing] pipeline load: {time.perf_counter() - t:.1f}s (device={DEVICE})", flush=True)
+# --- Lazy model: nothing loads at startup. The user signs in with an HF token, then clicks Download to
+# load the nf4-quantized pipeline onto the GPU (kept quantized — no dequant to bf16 — to save VRAM). ---
+pipe = None  # set by load_model()
+
+
+def sign_in(token):
+    """Persist the entered HF token (huggingface_hub login cache) so the gated download authenticates."""
+    token = (token or "").strip()
+    if not token:
+        return "⚠️ Enter a Hugging Face token first — get one at https://huggingface.co/settings/tokens"
+    try:
+        login(token=token)
+    except Exception as e:
+        return f"❌ Sign-in failed: {e}"
+    try:
+        name = whoami(token=token).get("name", "user")
+    except Exception:
+        name = "user"
+    return f"✅ Signed in as **{name}**. Now click **⬇️ Download / Load model**."
+
+
+def load_model(progress=gr.Progress(track_tqdm=True)):
+    global pipe
+    if pipe is not None:
+        return "✅ Model already loaded."
+    token = get_token()
+    if not token:
+        return "⚠️ Sign in first — enter your token and click **Sign in**."
+    progress(0.0, desc="Downloading / loading Ideogram 4 (nf4)…")
+    t = time.perf_counter()
+    try:
+        loaded = Ideogram4Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16, token=token)
+        loaded.to(DEVICE)
+    except Exception as e:
+        return f"❌ Load failed: {e}"
+    pipe = loaded
+    dt = time.perf_counter() - t
+    print(f"[timing] pipeline load: {dt:.1f}s (device={DEVICE})", flush=True)
+    return f"✅ Model loaded on **{DEVICE}** in {dt:.0f}s — enter a prompt and generate."
+
+
+def _require_pipe():
+    if pipe is None:
+        raise gr.Error("Load the model first — enter your HF token, click Sign in, then ⬇️ Download / Load model.")
 
 
 def remote_upsample(prompt, width, height):
@@ -94,6 +125,7 @@ def remote_upsample(prompt, width, height):
 
 
 def _gpu_generate(final_prompt, mode, width, height, seed, do_local, progress=gr.Progress(track_tqdm=True)):
+    _require_pipe()
     if do_local:
         progress(0.0, desc="✍️ Upsampling (local Qwen)…")
         t = time.perf_counter()
@@ -122,6 +154,7 @@ def _gpu_generate(final_prompt, mode, width, height, seed, do_local, progress=gr
 
 def _gpu_upsample(prompt, width, height, progress=gr.Progress(track_tqdm=True)):
     """Prompt-only drafting with the local Qwen graft (no diffusion)."""
+    _require_pipe()
     progress(0.0, desc="✍️ Upsampling (local Qwen)…")
     t = time.perf_counter()
     out = pipe.upsample_prompt(prompt, height=int(height), width=int(width), lm_head_repo_id=LM_HEAD_REPO)[0]
@@ -701,6 +734,22 @@ with gr.Blocks(title="Ideogram 4 Studio") as demo:
         "[Blog](https://ideogram.ai/blog/ideogram-4.0/)"
     )
 
+    with gr.Accordion("🔑 Hugging Face access & model", open=True):
+        with gr.Row():
+            hf_token_box = gr.Textbox(
+                label="Hugging Face token",
+                value=HF_TOKEN or "",
+                type="password",
+                placeholder="hf_...",
+                scale=4,
+                info="Gated model — accept the license at huggingface.co/ideogram-ai/ideogram-4-nf4 first.",
+            )
+            sign_in_btn = gr.Button("Sign in", scale=1)
+            load_btn = gr.Button("⬇️ Download / Load model", variant="primary", scale=1)
+        access_status = gr.Markdown(
+            "Enter your token and click **Sign in**, then **⬇️ Download / Load model** before generating."
+        )
+
     with gr.Row():
         with gr.Column(scale=1):
             prompt = gr.Textbox(
@@ -739,6 +788,9 @@ with gr.Blocks(title="Ideogram 4 Studio") as demo:
                         randomize = gr.Checkbox(label="Randomize seed", value=True)
             with gr.Accordion("Generated image (full resolution)", open=False):
                 out_image = gr.Image(label="Generated image", type="pil", interactive=False, show_label=False)
+
+    sign_in_btn.click(sign_in, inputs=[hf_token_box], outputs=[access_status])
+    load_btn.click(load_model, inputs=None, outputs=[access_status])
 
     gen_prompt_btn.click(
         generate_prompt,
