@@ -320,8 +320,15 @@ function renderCanvas(){
   const c = root.querySelector('.i4-canvas');
   if (!c) return;
   c.style.aspectRatio = (imgW || 1024) + ' / ' + (imgH || 1024);
-  if (imgUrl) { c.style.backgroundImage = "url('" + imgUrl + "')"; c.style.backgroundSize = '100% 100%'; }
-  else { c.style.backgroundImage = ''; c.style.backgroundSize = ''; }
+  if (imgUrl) {
+    c.style.backgroundImage = "url('" + imgUrl + "')";
+    c.style.backgroundSize = '100% 100%';
+    c.style.border = '1px solid var(--border)';  // drop the dashed drop-zone look once an image is shown
+  } else {
+    c.style.backgroundImage = '';
+    c.style.backgroundSize = '';
+    c.style.border = '1.5px dashed var(--border)';
+  }
   c.innerHTML = els().map((el, i) => {
     if (!hasBbox(el)) return '';
     const b = el.bbox;
