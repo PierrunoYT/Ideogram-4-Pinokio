@@ -176,7 +176,10 @@
       </div>
 
       <div class="card">
-        <label class="fld">Generated image</label>
+        <div class="row" style="align-items:center">
+          <label class="fld" style="margin:0">Generated image</label>
+          <a id="downloadBtn" class="btn grow0" style="opacity:.5; pointer-events:none" download="ideogram4.png">⬇️ Download</a>
+        </div>
         <img id="outimg" class="outimg" alt="">
         <label class="fld">Seed used</label>
         <input id="seedUsed" type="text" value="" readonly>
@@ -535,7 +538,13 @@ $('genImageBtn').onclick = async () => {
     busy($('genImageBtn'), true, '🎨 Generating…'); setStatus('🎨 Generating image…');
     const d = await api('/api/generate', body);
     imgUrl = d.image; imgW = d.width; imgH = d.height;
-    $('outimg').src = d.image; $('seedUsed').value = d.seed;
+    const out = $('outimg');
+    out.src = d.image;
+    out.style.maxWidth = imgW + 'px';  // never upscale past native resolution (avoids resampling seams)
+    $('seedUsed').value = d.seed;
+    const dl = $('downloadBtn');
+    dl.href = d.image; dl.download = 'ideogram4_' + d.seed + '.png';
+    dl.style.opacity = '1'; dl.style.pointerEvents = 'auto';
     renderCanvas();
     setStatus('✅ Done (seed ' + d.seed + ').');
   } catch (e) { setStatus('❌ ' + e.message); } finally { busy($('genImageBtn'), false); }
