@@ -1,0 +1,9 @@
+{
+  "version": "5.0",
+  "title": "Ideogram 4 Studio",
+  "description": "Ideogram 4 (nf4) open-weights text-to-image model (9.3B params, Qwen3-VL-8B text encoder, structured JSON prompting, native 2k resolution)",
+  "icon": "icon.png",
+  "platform": ["win32", "linux"],
+  "gpu": ["nvidia"],
+  "keywords": ["text-to-image", "diffusion", "ideogram", "dit", "flow-matching"]
+}

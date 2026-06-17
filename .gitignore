@@ -1,0 +1,4 @@
+ENVIRONMENT
+app/env/
+app/.env
+logs/

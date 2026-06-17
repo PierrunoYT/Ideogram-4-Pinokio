@@ -1,0 +1,14 @@
+# diffusers with Ideogram4 support — PR #13860 head, pinned to the verified SHA (AOTI artifact matches this block).
+diffusers @ git+https://github.com/huggingface/diffusers.git@04b197eece42bfc88d1814b20e07987d94cccaa7
+transformers==5.8.0
+peft==0.19.1
+accelerate==1.10.1
+bitsandbytes
+sentencepiece
+outlines==1.3.0
+pydantic>=2
+
+# Runtime deps the launcher's app.py imports (not part of the upstream diffusers stack)
+gradio
+requests
+huggingface_hub
