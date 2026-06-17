@@ -4,6 +4,8 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 # outlines_core ships an @torch.compile bitmask kernel dynamo can't trace (torch.device const) -> noisy
 # WON'T CONVERT spam on every local upsample. We never use torch.compile at runtime, so disable dynamo.
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
+# Show download progress bars + verbose loading logs in the terminal.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
 
 import base64
 import io
@@ -15,9 +17,17 @@ import time
 import gradio as gr
 import requests
 import torch
+import transformers
 from huggingface_hub import get_token, login, whoami
+from huggingface_hub.utils import enable_progress_bars
 
+import diffusers
 from diffusers import Ideogram4Pipeline
+
+# Surface download + component-loading progress in the terminal.
+enable_progress_bars()
+diffusers.utils.logging.set_verbosity_info()
+transformers.utils.logging.set_verbosity_info()
 
 # Runtime shim (keeps the bundled diffusers pristine): cu130-era bitsandbytes returns Params4bit.shape as a
 # plain tuple, but diffusers' check_quantized_param_shape calls .numel() on it. math.prod handles both, so
@@ -87,16 +97,22 @@ def load_model(progress=gr.Progress(track_tqdm=True)):
     if not token:
         return "⚠️ Sign in first — enter your token and click **Sign in**."
     progress(0.0, desc="Downloading / loading Ideogram 4 (nf4)…")
-    print(f"[model] downloading / loading {MODEL_ID} on {DEVICE} (cached weights load without a progress bar)…", flush=True)
+    print("=" * 70, flush=True)
+    print(f"[model] downloading + loading {MODEL_ID}", flush=True)
+    print("[model] already-cached files load instantly (no download bar); new files show a progress bar.", flush=True)
     t = time.perf_counter()
     try:
         loaded = Ideogram4Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16, token=token)
+        print(f"[model] from_pretrained done in {time.perf_counter() - t:.1f}s — moving to {DEVICE}…", flush=True)
+        progress(0.9, desc=f"Moving model to {DEVICE}…")
         loaded.to(DEVICE)
     except Exception as e:
+        print(f"[model] load failed: {e!r}", flush=True)
         return f"❌ Load failed: {e}"
     pipe = loaded
     dt = time.perf_counter() - t
-    print(f"[timing] pipeline load: {dt:.1f}s (device={DEVICE})", flush=True)
+    print(f"[model] ✅ ready on {DEVICE} in {dt:.1f}s", flush=True)
+    print("=" * 70, flush=True)
     return f"✅ Model loaded on **{DEVICE}** in {dt:.0f}s — enter a prompt and generate."
 
 
