@@ -215,15 +215,27 @@ def generate(
     if randomize_seed or seed is None or seed < 0:
         seed = random.randint(0, MAX_SEED)
 
-    studio = None
-    raw_state = getattr(evt, "state_json", None) if evt is not None else None
-    print(f"[generate] received state_json: {raw_state!r}", flush=True)
+    # The editor delivers the live JSON via trigger('generate_image', {state_json}). Depending on the
+    # gradio build that payload shows up either as evt.state_json or inside evt._data, so check both.
+    raw_state = None
     if evt is not None:
+        raw_state = getattr(evt, "state_json", None)
+        if raw_state is None:
+            data = getattr(evt, "_data", None)
+            if isinstance(data, dict):
+                raw_state = data.get("state_json", data.get("data"))
+            elif isinstance(data, str):
+                raw_state = data
+    print(f"[generate] resolved state payload: {str(raw_state)[:120]!r}", flush=True)
+
+    studio = None
+    if isinstance(raw_state, dict):
+        studio = raw_state
+    elif isinstance(raw_state, str) and raw_state.strip():
         try:
-            studio = json.loads(evt.state_json)
+            studio = json.loads(raw_state)
         except Exception as e:
-            print(f"[generate] failed to parse state_json: {e!r}", flush=True)
-            studio = None
+            print(f"[generate] failed to parse state payload: {e!r}", flush=True)
 
     if not _studio_has_content(studio):
         raise gr.Error("The Studio JSON is empty — draft it with ✨ Generate prompt or fill in the editor first.")
