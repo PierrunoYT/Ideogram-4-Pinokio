@@ -87,6 +87,7 @@ def load_model(progress=gr.Progress(track_tqdm=True)):
     if not token:
         return "⚠️ Sign in first — enter your token and click **Sign in**."
     progress(0.0, desc="Downloading / loading Ideogram 4 (nf4)…")
+    print(f"[model] downloading / loading {MODEL_ID} on {DEVICE} (cached weights load without a progress bar)…", flush=True)
     t = time.perf_counter()
     try:
         loaded = Ideogram4Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16, token=token)
