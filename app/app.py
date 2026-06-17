@@ -92,6 +92,7 @@ def sign_in(token):
 def set_ideogram_key(key):
     """Store the Ideogram API key so the remote magic-prompt upsampler can be used."""
     global IDEOGRAM_API_KEY
+    print(f"[set_ideogram_key] received key of type {type(key).__name__}, length {len(key or '')}", flush=True)
     IDEOGRAM_API_KEY = (key or "").strip() or None
     if IDEOGRAM_API_KEY:
         return "✅ Ideogram API key saved — select **Ideogram (remote)** as the prompt enhancer to use it."
