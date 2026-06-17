@@ -204,38 +204,28 @@ def _studio_has_content(j):
 
 
 def generate(
+    editor_value,
     mode,
     width,
     height,
     seed,
     randomize_seed,
-    evt: gr.EventData = None,
     progress=gr.Progress(track_tqdm=True),
 ):
     if randomize_seed or seed is None or seed < 0:
         seed = random.randint(0, MAX_SEED)
 
-    # The editor delivers the live JSON via trigger('generate_image', {state_json}). Depending on the
-    # gradio build that payload shows up either as evt.state_json or inside evt._data, so check both.
-    raw_state = None
-    if evt is not None:
-        data = getattr(evt, "_data", None)
-        print(f"[generate] evt type={type(evt).__name__} _data type={type(data).__name__} _data={str(data)[:200]!r}", flush=True)
-        raw_state = getattr(evt, "state_json", None)
-        if raw_state is None and isinstance(data, dict):
-            raw_state = data.get("state_json", data.get("data"))
-        elif raw_state is None and isinstance(data, str):
-            raw_state = data
-    print(f"[generate] resolved state payload: {str(raw_state)[:120]!r}", flush=True)
-
+    # The editor's value (set by ✨ Generate prompt and synced from the editor's frontend props.value)
+    # is the source of truth — gr.EventData trigger payloads aren't delivered on this gradio build.
+    print(f"[generate] editor_value type={type(editor_value).__name__}: {str(editor_value)[:120]!r}", flush=True)
     studio = None
-    if isinstance(raw_state, dict):
-        studio = raw_state
-    elif isinstance(raw_state, str) and raw_state.strip():
+    if isinstance(editor_value, dict):
+        studio = editor_value
+    elif isinstance(editor_value, str) and editor_value.strip():
         try:
-            studio = json.loads(raw_state)
+            studio = json.loads(editor_value)
         except Exception as e:
-            print(f"[generate] failed to parse state payload: {e!r}", flush=True)
+            print(f"[generate] failed to parse editor_value: {e!r}", flush=True)
 
     if not _studio_has_content(studio):
         raise gr.Error("The Studio JSON is empty — draft it with ✨ Generate prompt or fill in the editor first.")
@@ -853,7 +843,7 @@ with gr.Blocks(title="Ideogram 4 Studio") as demo:
     )
     editor.generate_image(
         generate,
-        inputs=[mode, width, height, seed, randomize],
+        inputs=[editor, mode, width, height, seed, randomize],
         outputs=[editor, out_image, seed],
     )
     width.change(lambda v: gr.update(img_width=int(v)), width, editor, show_progress="hidden")
