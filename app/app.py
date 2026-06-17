@@ -219,13 +219,13 @@ def generate(
     # gradio build that payload shows up either as evt.state_json or inside evt._data, so check both.
     raw_state = None
     if evt is not None:
+        data = getattr(evt, "_data", None)
+        print(f"[generate] evt type={type(evt).__name__} _data type={type(data).__name__} _data={str(data)[:200]!r}", flush=True)
         raw_state = getattr(evt, "state_json", None)
-        if raw_state is None:
-            data = getattr(evt, "_data", None)
-            if isinstance(data, dict):
-                raw_state = data.get("state_json", data.get("data"))
-            elif isinstance(data, str):
-                raw_state = data
+        if raw_state is None and isinstance(data, dict):
+            raw_state = data.get("state_json", data.get("data"))
+        elif raw_state is None and isinstance(data, str):
+            raw_state = data
     print(f"[generate] resolved state payload: {str(raw_state)[:120]!r}", flush=True)
 
     studio = None
