@@ -45,7 +45,53 @@ def _check_quantized_param_shape(self, param_name, current_param, loaded_param):
 
 BnB4BitDiffusersQuantizer.check_quantized_param_shape = _check_quantized_param_shape
 
-MODEL_ID = "ideogram-ai/ideogram-4-nf4"
+
+# Runtime shim: from_pretrained(torch_dtype=bfloat16) downcasts the MRoPE inv_freq buffer (float32 ->
+# bfloat16). With IMAGE_POSITION_OFFSET=65536, bf16's 7-bit mantissa scrambles the positional phase
+# (max ~58.8 rad error; 12/64 freqs > pi), corrupting spatial layout. See ideogram-oss/ideogram4#24.
+# We force inv_freq to stay float32 by rebuilding it (in float32) on every device/dtype move.
+from diffusers.models.transformers.transformer_ideogram4 import Ideogram4MRoPE  # noqa: E402
+
+
+def _restore_mrope_inv_freq(pipe_or_module):
+    """Re-register every Ideogram4MRoPE.inv_freq as float32 on its current device."""
+    n = 0
+    modules = getattr(pipe_or_module, "components", None)
+    roots = list(modules.values()) if isinstance(modules, dict) else [pipe_or_module]
+    for root in roots:
+        if not hasattr(root, "modules"):
+            continue
+        for m in root.modules():
+            if isinstance(m, Ideogram4MRoPE):
+                dev = m.inv_freq.device
+                inv_freq = 1.0 / (m._inv_freq_base ** (torch.arange(0, m.head_dim, 2, dtype=torch.float32) / m.head_dim))
+                m.register_buffer("inv_freq", inv_freq.to(device=dev), persistent=False)
+                n += 1
+    if n:
+        print(f"[shim] restored float32 inv_freq on {n} Ideogram4MRoPE module(s)", flush=True)
+    return n
+
+
+# Stash the rope base so the rebuild above doesn't have to guess it (the module keeps head_dim but not base).
+_orig_mrope_init = Ideogram4MRoPE.__init__
+
+
+def _mrope_init(self, head_dim, base, mrope_section, *args, **kwargs):
+    _orig_mrope_init(self, head_dim, base, mrope_section, *args, **kwargs)
+    self._inv_freq_base = base
+
+
+Ideogram4MRoPE.__init__ = _mrope_init
+
+# Selectable model variants. Only one is ever resident in VRAM at a time (see /api/load_model).
+#   nf4 — bitsandbytes 4-bit, smallest VRAM footprint.
+#   fp8 — 8-bit float weights, larger but higher fidelity.
+MODELS = {
+    "nf4": "ideogram-ai/ideogram-4-nf4",
+    "fp8": "ideogram-ai/ideogram-4-fp8",
+}
+DEFAULT_MODEL = "nf4"
+MODEL_ID = MODELS[DEFAULT_MODEL]
 LM_HEAD_REPO = "multimodalart/qwen3-vl-8b-instruct-lm-head"
 DEVICE = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 MAX_SEED = 2**31 - 1
@@ -62,6 +108,27 @@ MODES = {
 }
 
 pipe = None  # set by /api/load_model
+current_model = None  # key into MODELS for the variant currently resident in VRAM
+
+
+def _unload_pipe():
+    """Drop the resident pipeline and free its VRAM so only one model is ever loaded."""
+    global pipe, current_model
+    if pipe is None:
+        return
+    print(f"[model] unloading {current_model} to free VRAM…", flush=True)
+    try:
+        pipe.to("cpu")
+    except Exception:
+        pass
+    pipe = None
+    current_model = None
+    import gc
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 
 # --- Model helpers ----------------------------------------------------------------------------------------
@@ -109,7 +176,13 @@ def index():
 
 @app.get("/api/status")
 def status():
-    return {"loaded": pipe is not None, "device": DEVICE, "has_ideogram_key": bool(IDEOGRAM_API_KEY)}
+    return {
+        "loaded": pipe is not None,
+        "device": DEVICE,
+        "has_ideogram_key": bool(IDEOGRAM_API_KEY),
+        "model": current_model,
+        "models": list(MODELS.keys()),
+    }
 
 
 @app.post("/api/signin")
@@ -135,28 +208,37 @@ def save_key(payload: dict = Body(...)):
 
 
 @app.post("/api/load_model")
-def load_model_endpoint():
-    global pipe
-    if pipe is not None:
-        return {"ok": True, "message": "Model already loaded."}
+def load_model_endpoint(payload: dict = Body(default={})):
+    global pipe, current_model
+    variant = (payload or {}).get("model") or DEFAULT_MODEL
+    if variant not in MODELS:
+        return JSONResponse({"ok": False, "message": f"Unknown model '{variant}'. Choose one of: {', '.join(MODELS)}."}, status_code=400)
+    if pipe is not None and current_model == variant:
+        return {"ok": True, "message": f"{variant} model already loaded.", "model": current_model}
     token = get_token()
     if not token:
         return JSONResponse({"ok": False, "message": "Sign in first."}, status_code=400)
+    # Keep only one model in VRAM — free the other before loading the requested one.
+    if pipe is not None:
+        _unload_pipe()
+    model_id = MODELS[variant]
     print("=" * 70, flush=True)
-    print(f"[model] downloading + loading {MODEL_ID} (cached files load without a progress bar)", flush=True)
+    print(f"[model] downloading + loading {model_id} (cached files load without a progress bar)", flush=True)
     t = time.perf_counter()
     try:
-        loaded = Ideogram4Pipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16, token=token)
+        loaded = Ideogram4Pipeline.from_pretrained(model_id, torch_dtype=torch.bfloat16, token=token)
         print(f"[model] from_pretrained done in {time.perf_counter() - t:.1f}s — moving to {DEVICE}…", flush=True)
         loaded.to(DEVICE)
+        _restore_mrope_inv_freq(loaded)  # undo the bf16 inv_freq downcast (ideogram4#24)
     except Exception as e:
         print(f"[model] load failed: {e!r}", flush=True)
         return JSONResponse({"ok": False, "message": f"Load failed: {e}"}, status_code=500)
     pipe = loaded
+    current_model = variant
     dt = time.perf_counter() - t
-    print(f"[model] ✅ ready on {DEVICE} in {dt:.1f}s", flush=True)
+    print(f"[model] ✅ {variant} ready on {DEVICE} in {dt:.1f}s", flush=True)
     print("=" * 70, flush=True)
-    return {"ok": True, "message": f"Model loaded on {DEVICE} in {dt:.0f}s — generate away."}
+    return {"ok": True, "message": f"{variant} model loaded on {DEVICE} in {dt:.0f}s — generate away.", "model": current_model}
 
 
 @app.post("/api/upsample")

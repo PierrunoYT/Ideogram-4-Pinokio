@@ -109,9 +109,17 @@
         <input id="hfToken" type="password" placeholder="hf_...">
         <div class="i4-hint">Gated model — accept the license at huggingface.co/ideogram-ai/ideogram-4-nf4 first.</div>
       </div>
+      <div class="grow0" style="min-width:150px">
+        <label class="fld">Model</label>
+        <select id="modelSel">
+          <option value="nf4">nf4 (4-bit · less VRAM)</option>
+          <option value="fp8">fp8 (8-bit · higher quality)</option>
+        </select>
+      </div>
       <button id="signinBtn" class="btn grow0">Sign in</button>
       <button id="loadBtn" class="btn primary grow0">⬇️ Download / Load model</button>
     </div>
+    <div class="i4-hint" style="margin-top:6px">Only one model stays in VRAM — switching unloads the other automatically.</div>
     <div class="row" style="margin-top:10px">
       <div style="flex:4">
         <label class="fld">Ideogram API key (optional)</label>
@@ -519,7 +527,8 @@ $('saveKeyBtn').onclick = async () => {
   try { const d = await api('/api/save_key', { key: $('idKey').value }); setStatus(d.message); } catch (e) { setStatus('❌ ' + e.message); }
 };
 $('loadBtn').onclick = async () => {
-  try { busy($('loadBtn'), true, '⏳ Loading…'); setStatus('⏳ Downloading / loading model — watch the terminal for progress…'); const d = await api('/api/load_model'); setStatus('✅ ' + d.message); }
+  const model = $('modelSel').value;
+  try { busy($('loadBtn'), true, '⏳ Loading…'); setStatus('⏳ Downloading / loading ' + model + ' model — watch the terminal for progress…'); const d = await api('/api/load_model', { model }); setStatus('✅ ' + d.message); }
   catch (e) { setStatus('❌ ' + e.message); } finally { busy($('loadBtn'), false); }
 };
 $('genPromptBtn').onclick = async () => {
@@ -553,7 +562,8 @@ $('genImageBtn').onclick = async () => {
 // initial paint + reflect server state
 renderAll();
 fetch('/api/status').then(r => r.json()).then(s => {
-  if (s.loaded) setStatus('✅ Model already loaded on ' + s.device + ' — generate away.');
+  if (s.model) $('modelSel').value = s.model;
+  if (s.loaded) setStatus('✅ ' + (s.model || '') + ' model already loaded on ' + s.device + ' — generate away.');
 }).catch(() => {});
 </script>
 </body>
