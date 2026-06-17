@@ -89,6 +89,15 @@ def sign_in(token):
     return f"✅ Signed in as **{name}**. Now click **⬇️ Download / Load model**."
 
 
+def set_ideogram_key(key):
+    """Store the Ideogram API key so the remote magic-prompt upsampler can be used."""
+    global IDEOGRAM_API_KEY
+    IDEOGRAM_API_KEY = (key or "").strip() or None
+    if IDEOGRAM_API_KEY:
+        return "✅ Ideogram API key saved — select **Ideogram (remote)** as the prompt enhancer to use it."
+    return "Ideogram key cleared — using the local Qwen upsampler."
+
+
 def load_model(progress=gr.Progress(track_tqdm=True)):
     global pipe
     if pipe is not None:
@@ -767,6 +776,16 @@ with gr.Blocks(title="Ideogram 4 Studio") as demo:
             )
             sign_in_btn = gr.Button("Sign in", scale=1)
             load_btn = gr.Button("⬇️ Download / Load model", variant="primary", scale=1)
+        with gr.Row():
+            ideogram_key_box = gr.Textbox(
+                label="Ideogram API key (optional)",
+                value=IDEOGRAM_API_KEY or "",
+                type="password",
+                placeholder="leave blank to use the local Qwen upsampler",
+                scale=4,
+                info="Only needed for the 'Ideogram (remote)' prompt enhancer — get one at developer.ideogram.ai",
+            )
+            save_key_btn = gr.Button("Save key", scale=1)
         access_status = gr.Markdown(
             "Enter your token and click **Sign in**, then **⬇️ Download / Load model** before generating."
         )
@@ -781,9 +800,9 @@ with gr.Blocks(title="Ideogram 4 Studio") as demo:
             )
             upsampler = gr.Radio(
                 choices=UPSAMPLERS,
-                value=UPSAMPLER_REMOTE,
+                value=UPSAMPLER_LOCAL,
                 label="Prompt enhancement",
-                info="Which upsampler drafts the JSON caption that populates the editor.",
+                info="Which upsampler drafts the JSON caption. 'Ideogram (remote)' needs an API key above.",
             )
             gen_prompt_btn = gr.Button("✨ Generate prompt", variant="primary")
             gr.Examples(
@@ -812,6 +831,7 @@ with gr.Blocks(title="Ideogram 4 Studio") as demo:
 
     sign_in_btn.click(sign_in, inputs=[hf_token_box], outputs=[access_status])
     load_btn.click(load_model, inputs=None, outputs=[access_status])
+    save_key_btn.click(set_ideogram_key, inputs=[ideogram_key_box], outputs=[access_status])
 
     gen_prompt_btn.click(
         generate_prompt,

@@ -8,7 +8,9 @@ sentencepiece
 outlines==1.3.0
 pydantic>=2
 
-# Runtime deps the launcher's app.py imports (not part of the upstream diffusers stack)
-gradio
+# Runtime deps the launcher's app.py imports (not part of the upstream diffusers stack).
+# gradio is pinned to the version the source Space uses — the Studio editor relies on a
+# version-sensitive reactive-HTML API, and a mismatch breaks the editor JSON sync.
+gradio==6.15.2
 requests
 huggingface_hub
