@@ -7,6 +7,8 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 # Show download progress bars + verbose loading logs in the terminal.
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
 
+import base64
+import io
 import json
 import math
 import random
@@ -182,11 +184,20 @@ def generate_prompt(prompt, upsampler, width, height, progress=gr.Progress(track
 
 
 # --- Image generation ---------------------------------------------------------------------------------------
-def generate_image(json_text, mode, width, height, seed, randomize_seed, progress=gr.Progress(track_tqdm=True)):
-    """🎨 Generate image → render the JSON caption exactly as shown in the editor."""
+def _img_to_data_url(image):
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def generate(editor_value, mode, width, height, seed, randomize_seed, progress=gr.Progress(track_tqdm=True)):
+    """🎨 Generate image → render the editor's JSON exactly, and drop the result onto the canvas.
+
+    The editor keeps its JSON in props.value (synced from the canvas), so we read it as a normal input
+    instead of the trigger payload (gr.EventData isn't delivered on this gradio build)."""
     _require_pipe()
     try:
-        studio = json.loads(json_text) if isinstance(json_text, str) else json_text
+        studio = json.loads(editor_value) if isinstance(editor_value, str) else editor_value
     except Exception as e:
         raise gr.Error(f"The JSON is invalid: {e}. Fix it in the editor or re-run ✨ Generate prompt.")
     if not isinstance(studio, dict) or not (
@@ -194,7 +205,7 @@ def generate_image(json_text, mode, width, height, seed, randomize_seed, progres
         or (studio.get("compositional_deconstruction") or {}).get("elements")
         or (studio.get("compositional_deconstruction") or {}).get("background")
     ):
-        raise gr.Error("The JSON is empty — draft it with ✨ Generate prompt or fill in the editor first.")
+        raise gr.Error("The Studio JSON is empty — draft it with ✨ Generate prompt or fill in the editor first.")
 
     if randomize_seed or seed is None or seed < 0:
         seed = random.randint(0, MAX_SEED)
@@ -206,7 +217,14 @@ def generate_image(json_text, mode, width, height, seed, randomize_seed, progres
     t = time.perf_counter()
     image = pipe(prompt=final_prompt, width=int(width), height=int(height), generator=generator, **preset).images[0]
     print(f"[timing] diffusion ({mode}): {time.perf_counter() - t:.2f}s", flush=True)
-    return image, int(seed)
+
+    editor_update = gr.update(
+        value=studio,
+        image_url=_img_to_data_url(image),
+        img_width=int(width),
+        img_height=int(height),
+    )
+    return editor_update, image, int(seed)
 
 
 CSS = """
@@ -299,11 +317,15 @@ with gr.Blocks(title="Ideogram 4 Studio", css=CSS, theme=gr.themes.Citrus()) as 
         inputs=[prompt, upsampler, width, height],
         outputs=[editor],
     )
-    gen_image_btn.click(
-        generate_image,
+    # Both the canvas toolbar button (editor.generate_image custom event) and the standalone button
+    # run generate, reading the editor's synced JSON value from inputs (no EventData payload needed).
+    gen_args = dict(
+        fn=generate,
         inputs=[editor, mode, width, height, seed, randomize],
-        outputs=[out_image, used_seed],
+        outputs=[editor, out_image, used_seed],
     )
+    editor.generate_image(**gen_args)
+    gen_image_btn.click(**gen_args)
     width.change(lambda v: gr.update(img_width=int(v)), width, editor, show_progress="hidden")
     height.change(lambda v: gr.update(img_height=int(v)), height, editor, show_progress="hidden")
 

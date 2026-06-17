@@ -202,6 +202,9 @@ function renderAll(){
         <button class="i4-tab ${tab === 'visual' ? 'on' : ''}" data-act="tab" data-tab="visual">Visual editor</button>
         <button class="i4-tab ${tab === 'json' ? 'on' : ''}" data-act="tab" data-tab="json">JSON</button>
       </div>
+      <div class="i4-actions">
+        <button class="i4-btn primary" data-act="gen-image">🎨 Generate image</button>
+      </div>
     </div>
     <div class="i4-body">${tab === 'visual' ? visualHTML() : jsonHTML()}</div>`;
   if (tab === 'visual') { renderCanvas(); renderElList(); }
@@ -276,6 +279,7 @@ element.addEventListener('click', (e) => {
   if (!t) return;
   const act = t.dataset.act;
   if (act === 'tab') { tab = t.dataset.tab; jsonMsg = ''; renderAll(); }
+  else if (act === 'gen-image') { syncValue(); trigger('generate_image'); }
   else if (act === 'stylemode') {
     const m = t.dataset.m, s = sd();
     if (m === 'photo' && !isPhoto()) { s.photo = s.photo || s.art_style || ''; delete s.art_style; s.medium = 'photograph'; }
