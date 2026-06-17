@@ -206,10 +206,13 @@ def generate(
         seed = random.randint(0, MAX_SEED)
 
     studio = None
+    raw_state = getattr(evt, "state_json", None) if evt is not None else None
+    print(f"[generate] received state_json: {raw_state!r}", flush=True)
     if evt is not None:
         try:
             studio = json.loads(evt.state_json)
-        except Exception:
+        except Exception as e:
+            print(f"[generate] failed to parse state_json: {e!r}", flush=True)
             studio = None
 
     if not _studio_has_content(studio):
@@ -248,6 +251,7 @@ def generate_prompt(
         jp = json.loads(raw)
     except Exception:
         jp = {"high_level_description": raw}
+    print(f"[generate_prompt] drafted JSON -> editor: {json.dumps(jp, ensure_ascii=False)[:500]}", flush=True)
     return gr.update(value=jp)
 
 
