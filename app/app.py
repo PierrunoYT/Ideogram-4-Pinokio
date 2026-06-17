@@ -15,6 +15,7 @@ import time
 import gradio as gr
 import requests
 import torch
+from huggingface_hub import get_token
 
 from diffusers import Ideogram4Pipeline
 
@@ -36,7 +37,9 @@ BnB4BitDiffusersQuantizer.check_quantized_param_shape = _check_quantized_param_s
 
 MODEL_ID = "ideogram-ai/ideogram-4-nf4"
 LM_HEAD_REPO = "multimodalart/qwen3-vl-8b-instruct-lm-head"
-HF_TOKEN = os.environ.get("HF_TOKEN")
+# Prefer an explicit env var, but fall back to a token saved by `hf auth login` so running
+# `python app.py` by hand (outside Pinokio, which injects the ENVIRONMENT file) still authenticates.
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or get_token()
 DEVICE = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 MAX_SEED = 2**31 - 1
 
@@ -57,10 +60,14 @@ MODES = {
 
 # --- Pipeline: load nf4-quantized straight onto the GPU. Locally we keep the weights quantized (no dequant
 # to bf16) so the model fits in far less VRAM; there's no AOTI fast-path here, the transformers run eager. ---
+if not HF_TOKEN:
+    raise SystemExit(
+        "No Hugging Face token found. ideogram-4-nf4 is gated.\n"
+        "Set HF_TOKEN (Pinokio writes it to the ENVIRONMENT file at install time) or run `hf auth login`,\n"
+        "and make sure you've accepted the gate at https://huggingface.co/ideogram-ai/ideogram-4-nf4"
+    )
 t = time.perf_counter()
-load_kwargs = {"torch_dtype": torch.bfloat16}
-if HF_TOKEN:
-    load_kwargs["token"] = HF_TOKEN
+load_kwargs = {"torch_dtype": torch.bfloat16, "token": HF_TOKEN}
 pipe = Ideogram4Pipeline.from_pretrained(MODEL_ID, **load_kwargs)
 pipe.to(DEVICE)
 print(f"[timing] pipeline load: {time.perf_counter() - t:.1f}s (device={DEVICE})", flush=True)
